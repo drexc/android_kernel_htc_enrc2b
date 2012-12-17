@@ -46,7 +46,7 @@
 
 #undef AUDIO_DEBUG_BEEP
 #undef AUDIO_DEBUG
-#define AUDIO_DEBUG 0
+#define AUDIO_DEBUG 1
 
 #if AUDIO_DEBUG
 #define AUDIO_DEBUG_BEEP 1
@@ -104,9 +104,7 @@ static void aic3008_powerdown(void);
 static void aic3008_powerup(void);
 void aic3008_votecpuminfreq(bool bflag);
 static struct switch_dev sdev_beats;
-#if defined(CONFIG_AUDIO_LISTEN_NOTIFICATION)
-static struct switch_dev sdev_listen_notification;
-#endif
+
 /*****************************************************************************/
 /* Specific SPI read/write command for AIC3008                               */
 /*****************************************************************************/
@@ -531,7 +529,7 @@ static void aic3008_sw_reset(struct snd_soc_codec *codec)
 	aic3008_config(CODEC_SW_RESET, ARRAY_SIZE(CODEC_SW_RESET));
 }
 
-static int aic3008_volatile_register(unsigned int reg)
+static int aic3008_volatile_register(struct snd_soc_codec *codec, unsigned int reg)
 {
 	/* check which registers are volatile on the T30S side */
 	return 0;
@@ -885,6 +883,8 @@ static int aic3008_set_config(int config_tbl, int idx, int en)
 		return -EFAULT;
 	}
 
+	AUD_INFO("%s: %d %d %d", __func__, config_tbl, idx, en);
+
 	mutex_lock(&lock);
 /*	spi_aic3008_prevent_sleep(); */
 
@@ -968,11 +968,18 @@ static int aic3008_set_config(int config_tbl, int idx, int en)
 		}
 		break;
 	case AIC3008_IO_CONFIG_MEDIA:
-		if(idx == 49)
+        // maxwen TODO
+		if(idx == 20)
+		{
+				mutex_unlock(&lock);
+	            return rc;
+		}
+		else if(idx == 49)
 		{
 			AUD_DBG("[DSP] idx = %d, Mic Mute!!", idx);
 			if (aic3008_tx_mode == UPLINK_BT_AP ||
 				aic3008_tx_mode == UPLINK_BT_BB ){
+			    AUD_DBG("[DSP] idx = %d, BT Mic mute!!", idx);
 				aic3008_config(BT_MIC_MUTE, ARRAY_SIZE(BT_MIC_MUTE));		// mute mic
 			}
 			else{
@@ -995,6 +1002,7 @@ static int aic3008_set_config(int config_tbl, int idx, int en)
 			AUD_DBG("[DSP] idx = %d, Mic unMute!!", idx);
 			if (aic3008_tx_mode == UPLINK_BT_AP ||
 				aic3008_tx_mode == UPLINK_BT_BB ){
+			    AUD_DBG("[DSP] idx = %d, BT Mic unMute!!", idx);
 				aic3008_config(BT_MIC_UNMUTE, ARRAY_SIZE(BT_MIC_UNMUTE));		// mute mic
 			}
 			else{
@@ -1092,28 +1100,6 @@ static int aic3008_set_config(int config_tbl, int idx, int en)
 			aic3008_power_ctl->modem_coredump();
 			AUD_ERR("%s trigger_modem_coredump -----\n", __func__);
 		}
-#if defined(CONFIG_AUDIO_LISTEN_NOTIFICATION)
-//enable listen notification
-		else if(idx == 62)
-		{
-			AUD_INFO("[DSP] idx = %d, enable listen notification!!", idx);
-			int new_state = 1, old_state = 0;
-			old_state = switch_get_state(&sdev_listen_notification);
-			if (new_state != old_state)
-				switch_set_state(&sdev_listen_notification, new_state);
-			break;
-		}
-//disable listen notification
-		else if(idx == 63)
-		{
-			AUD_INFO("[DSP] idx = %d, disable listen notification!!", idx);
-			int new_state = 0, old_state = 0;
-			old_state = switch_get_state(&sdev_listen_notification);
-			if (new_state != old_state)
-				switch_set_state(&sdev_listen_notification, new_state);
-			break;
-		}
-#endif
 		else if(idx < 0 || idx >= End_Audio_Effect)
 		{
 			AUD_ERR("[DSP] AIC3008_IO_CONFIG_MEDIA: idx %d is out of range.", idx);
@@ -1124,10 +1110,24 @@ static int aic3008_set_config(int config_tbl, int idx, int en)
 
 		/* i2s config */
 		if (aic3008_power_ctl->i2s_switch) {
+            // maxwen TODO
 			if (aic3008_dspindex[idx] != -1) {
+				AUD_ERR("[DSP] AIC3008_IO_CONFIG_MEDIA: dsp index %d %d\n", idx, aic3008_dspindex[idx]);
 				aic3008_power_ctl->i2s_control(aic3008_dspindex[idx]);
 			} else {
-				AUD_ERR("[DSP] AIC3008_IO_CONFIG_MEDIA: unknown dsp index %d\n", idx);
+                AUD_INFO("[DSP] AIC3008_IO_CONFIG_MEDIA: hardcoded i2s_switch\n");
+			    if (idx == 6){
+                    AUD_INFO("[DSP] AIC3008_IO_CONFIG_MEDIA: hardcoded i2s_switch %d %d\n", idx, Phone_BT);
+				    aic3008_power_ctl->i2s_control(Phone_BT);
+                } else if (idx == 1){
+                    AUD_INFO("[DSP] AIC3008_IO_CONFIG_MEDIA: hardcoded i2s_switch %d %d\n", idx, Phone_Default);
+				    aic3008_power_ctl->i2s_control(Phone_Default);
+                } else if (idx == 8){
+                    AUD_INFO("[DSP] AIC3008_IO_CONFIG_MEDIA: hardcoded i2s_switch %d %d\n", idx, Playback_Default);
+				    aic3008_power_ctl->i2s_control(Playback_Default);
+                } else {
+			    	AUD_ERR("[DSP] AIC3008_IO_CONFIG_MEDIA: unknown dsp index %d\n", idx);
+			    }
 			}
 		}
 
@@ -1151,6 +1151,7 @@ static int aic3008_set_config(int config_tbl, int idx, int en)
 		len = (((int)(aic3008_minidsp[idx][0].reg) & 0xFF) << 8) | ((int)(aic3008_minidsp[idx][0].data) & 0xFF);
 
 		t1 = ktime_to_ms(ktime_get());
+
 		/* step 1: path off first
 			Symptom:
 				If downlink wasn't path_off, it could have noise when config DSP.
@@ -1254,7 +1255,6 @@ static long aic3008_ioctl(struct file *file, unsigned int cmd,
 		unsigned long argc)
 {
 	struct AIC3008_PARAM para;
-	struct pid *pid_struct = NULL;
 	void *table;
 	int ret = 0, i = 0, mem_size, volume = 0;
 	CODEC_SPI_CMD reg[4];
@@ -1274,8 +1274,12 @@ static long aic3008_ioctl(struct file *file, unsigned int cmd,
 	switch (cmd) {
 	/* first IO command from HAL */
 	case AIC3008_IO_SET_TX_PARAM:
+	    AUD_INFO("AIC3008_IO_SET_TX_PARAM\n");
 	/* second IO command from HAL */
 	case AIC3008_IO_SET_RX_PARAM:
+        if (cmd != AIC3008_IO_SET_TX_PARAM)
+	        AUD_INFO("AIC3008_IO_SET_RX_PARAM\n");
+
 		if (copy_from_user(&para, (void *) argc, sizeof(para))) {
 			AUD_ERR("failed on copy_from_user\n");
 			ret = -EFAULT;
@@ -1315,7 +1319,9 @@ static long aic3008_ioctl(struct file *file, unsigned int cmd,
 		break;
 
 	/* third io command from HAL */
+    case 0x40047320:
 	case AIC3008_IO_SET_DSP_PARAM:
+	    AUD_INFO("AIC3008_IO_SET_DSP_PARAM\n");
 		if (copy_from_user(&para, (void *) argc, sizeof(para))) {
 			AUD_ERR("failed on copy_from_user\n");
 			ret = -EFAULT;
@@ -1345,10 +1351,12 @@ static long aic3008_ioctl(struct file *file, unsigned int cmd,
 
 		AUD_INFO("update dsp table(%d, %d) successfully\n",
 				para.row_num, para.col_num);
+
 		break;
 
 	/* fourth io command from HAL */
 	case AIC3008_IO_SET_DSP_INDEX:
+	    AUD_INFO("AIC3008_IO_SET_DSP_INDEX\n");
 		if (copy_from_user(&para, (void *) argc, sizeof(para))) {
 			AUD_ERR("failed on copy_from_user\n");
 			ret = -EFAULT;
@@ -1382,8 +1390,14 @@ static long aic3008_ioctl(struct file *file, unsigned int cmd,
 
 	/* these IO commands are called to set path */
 	case AIC3008_IO_CONFIG_TX:
+	    AUD_INFO("AIC3008_IO_CONFIG_TX\n");
 	case AIC3008_IO_CONFIG_RX:
+        if (cmd != AIC3008_IO_CONFIG_TX)
+	        AUD_INFO("AIC3008_IO_CONFIG_RX\n");
 	case AIC3008_IO_CONFIG_MEDIA:
+        if (cmd != AIC3008_IO_CONFIG_TX && cmd !=AIC3008_IO_CONFIG_RX)
+	        AUD_INFO("AIC3008_IO_CONFIG_MEDIA\n");
+
 		if (copy_from_user(&i, (void *) argc, sizeof(int))) {
 			AUD_ERR("failed on copy_from_user\n");
 			ret = -EFAULT;
@@ -1473,7 +1487,7 @@ static long aic3008_ioctl(struct file *file, unsigned int cmd,
 		AUD_INFO("len = %d", len);
 
 		for (i = 0; i < len; i++) {
-			AUD_INFO("{'%s', 0x%02X, 0x%02X},\n",
+			AUD_INFO("{'%d', 0x%02X, 0x%02X},\n",
 				aic3008_minidsp[aic3008_dsp_mode][i].act,
 				aic3008_minidsp[aic3008_dsp_mode][i].reg,
 				aic3008_minidsp[aic3008_dsp_mode][i].data);
@@ -1541,25 +1555,6 @@ static long aic3008_ioctl(struct file *file, unsigned int cmd,
 		}
 		break;
 
-	case AIC3008_IO_KILL_PID:
-
-		if (copy_from_user(&i, (void *) argc, sizeof(int))) {
-			ret = -EFAULT;
-			break;
-		}
-
-		AUD_INFO("AIC3008_IO_KILL_PID: %d\n", i);
-
-		if (i <= 0)
-			break;
-
-		pid_struct = find_get_pid(i);
-		if (pid_struct) {
-			kill_pid(pid_struct, SIGKILL, 1);
-			AUD_INFO("kill pid: %d", i);
-		}
-		break;
-
 	default:
 		AUD_ERR("invalid command %d\n", _IOC_NR(cmd));
 		ret = -EINVAL;
@@ -1586,12 +1581,6 @@ static ssize_t beats_print_name(struct switch_dev *sdev, char *buf){
 	return sprintf(buf, "Beats\n");
 }
 
-#if defined(CONFIG_AUDIO_LISTEN_NOTIFICATION)
-//Add for listen_notification
-static ssize_t listen_notification_print_name(struct switch_dev *sdev, char *buf){
-	return sprintf(buf, "Listen_notification\n");
-}
-#endif
 /*****************************************************************************/
 /* Audio Codec specific DAI callback functions                               */
 /*****************************************************************************/
@@ -1763,6 +1752,7 @@ static int __devinit aic3008_probe(struct snd_soc_codec *codec)
 {
 	AUD_INFO("aic3008_probe() start... aic3008_codec:%p", codec);
 	int ret = 0;
+    int i = 0;
 
 	struct aic3008_priv *aic3008 = snd_soc_codec_get_drvdata(codec);
 	if (!aic3008) {
@@ -1791,6 +1781,10 @@ static int __devinit aic3008_probe(struct snd_soc_codec *codec)
 		AUD_ERR("aic3008_probe() aic3008_minidsp alloc failed.");
 		goto minidsp_failed;
 	}
+
+    for (i=0; i<MINIDSP_ROW_MAX; i++){
+        aic3008_dspindex[i] = -1;
+    }
 
 	bulk_tx = kcalloc(MINIDSP_COL_MAX * 2 , sizeof(uint8_t), GFP_KERNEL);
 	if (bulk_tx == NULL) {
@@ -1834,7 +1828,7 @@ static int aic3008_resume(struct snd_soc_codec *codec)
 	return 0;
 }
 
-static struct snd_soc_codec_driver soc_codec_dev_aic3008 = {
+static struct snd_soc_codec_driver soc_codec_dev_aic3008 __refdata = {
 	.probe =	aic3008_probe,
 	.remove =	aic3008_remove,
 	.suspend =	aic3008_suspend,
@@ -1948,16 +1942,6 @@ static int __init aic3008_modinit(void)
 		pr_err("failed to register beats switch device!\n");
 		return ret;
 	}
-#if defined(CONFIG_AUDIO_LISTEN_NOTIFICATION)
-//Add for listen_notification
-	sdev_listen_notification.name = "Listen_notification";
-	sdev_listen_notification.print_name = listen_notification_print_name;
-	ret = switch_dev_register(&sdev_listen_notification);
-	if (ret < 0) {
-		pr_err("failed to register listen_notification switch device!\n");
-		return ret;
-	}
-#endif
 	return 0;
 }
 module_init(aic3008_modinit);
