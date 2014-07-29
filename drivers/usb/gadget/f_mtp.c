@@ -303,7 +303,7 @@ struct mtp_device_status {
 static struct mtp_dev *_mtp_dev;
 
 void tegra_udc_set_phy_clk(bool pull_up);
-static void mtp_setup_perflock()
+static void mtp_setup_perflock(struct work_struct *data)
 {
 	struct mtp_dev *dev = _mtp_dev;
 	struct usb_composite_dev    *cdev = dev->cdev;
