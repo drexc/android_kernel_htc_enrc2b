@@ -34,6 +34,10 @@ DECOMPRESS = decompress.o
 
 FONTC	= $(srctree)/drivers/video/console/font_acorn_8x8.c
 
+# string library code (-Os is enforced to keep it much smaller)
+OBJS		+= string.o
+CFLAGS_string.o	:= -Os
+
 #
 # Architecture dependencies
 #
@@ -96,6 +100,7 @@ SEDFLAGS	= s/TEXT_START/$(ZTEXTADDR)/;s/BSS_START/$(ZBSSADDR)/
 suffix_$(CONFIG_KERNEL_GZIP) = gzip
 suffix_$(CONFIG_KERNEL_LZO)  = lzo
 suffix_$(CONFIG_KERNEL_LZMA) = lzma
+suffix_$(CONFIG_KERNEL_XZ)   = xzkern
 
 targets := vmlinux vmlinux.lds \
 		 piggy.$(suffix_y) piggy.$(suffix_y).o \
@@ -110,7 +115,7 @@ KBUILD_CFLAGS = $(subst -pg, , $(ORIG_CFLAGS))
 endif
 
 ccflags-y := -fpic -fno-builtin
-asflags-y := -Wa,-march=armv7-a
+asflags-y := -Wa,-march=all
 
 # Supply ZRELADDR to the decompressor via a linker symbol.
 ifneq ($(CONFIG_AUTO_ZRELADDR),y)
@@ -133,6 +138,13 @@ AFLAGS_lib1funcs.o +=-Wa,-march=armv7-a$(plus_sec)
 lib1funcs = $(obj)/lib1funcs.o
 
 $(obj)/lib1funcs.S: $(srctree)/arch/$(SRCARCH)/lib/lib1funcs.S FORCE
+	$(call cmd,shipped)
+
+# For __aeabi_llsl
+AFLAGS_ashldi3.o +=-Wa,-march=armv7-a$(plus_sec)
+ashldi3 = $(obj)/ashldi3.o
+
+$(obj)/ashldi3.S: $(srctree)/arch/$(SRCARCH)/lib/ashldi3.S
 	$(call cmd,shipped)
 
 # We need to prevent any GOTOFF relocs being used with references
@@ -166,5 +178,3 @@ $(obj)/font.c: $(FONTC)
 
 $(obj)/vmlinux.lds: $(obj)/vmlinux.lds.in arch/arm/boot/Makefile $(KCONFIG_CONFIG)
 	@sed "$(SEDFLAGS)" < $< > $@
-
-
